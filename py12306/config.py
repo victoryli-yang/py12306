@@ -20,6 +20,7 @@ class Config:
     # 多线程查询
     QUERY_JOB_THREAD_ENABLED = 0
     # 打码平台账号
+    AUTO_CODE_PLATFORM = ''
     AUTO_CODE_ACCOUNT = {'user': '', 'pwd': ''}
     # 输出日志到文件
     OUT_PUT_LOG_TO_FILE_ENABLED = 0
@@ -45,7 +46,7 @@ class Config:
     NOTIFICATION_API_APP_CODE = ''
 
     # 集群配置
-    CLUSTER_ENABLED = 1
+    CLUSTER_ENABLED = 0
     NODE_SLAVE_CAN_BE_MASTER = 1
     NODE_IS_MASTER = 1
     NODE_NAME = ''
@@ -53,10 +54,24 @@ class Config:
     REDIS_PORT = '6379'
     REDIS_PASSWORD = ''
 
+    # 邮箱配置
+    EMAIL_ENABLED = 0
+    EMAIL_SENDER = ''
+    EMAIL_RECEIVER = ''
+    EMAIL_SERVER_HOST = ''
+    EMAIL_SERVER_USER = ''
+    EMAIL_SERVER_PASSWORD = ''
+
+    WEB_ENABLE = 0
+    WEB_USER = {}
+    WEB_PORT = 8080
+    WEB_ENTER_HTML_PATH = PROJECT_DIR + 'py12306/web/static/index.html'
+
     envs = []
     retry_time = 5
+    last_modify_time = 0
 
-    disallow_update_cofigs = [
+    disallow_update_configs = [
         'CLUSTER_ENABLED',
         'NODE_IS_MASTER',
         'NODE_NAME',
@@ -67,8 +82,11 @@ class Config:
 
     def __init__(self):
         self.init_envs()
+        self.last_modify_time = get_file_modify_time(self.CONFIG_FILE)
         if Config().is_slave():
             self.refresh_configs(True)
+        else:
+            create_thread_and_run(self, 'watch_file_change', False)
 
     @classmethod
     def run(cls):
@@ -109,12 +127,30 @@ class Config:
         for key, value in envs:
             setattr(self, key, value)
 
+    def watch_file_change(self):
+        """
+        监听配置文件修改
+        :return:
+        """
+        if Config().is_slave(): return
+        from py12306.log.common_log import CommonLog
+        while True:
+            value = get_file_modify_time(self.CONFIG_FILE)
+            if value > self.last_modify_time:
+                self.last_modify_time = value
+                CommonLog.add_quick_log(CommonLog.MESSAGE_CONFIG_FILE_DID_CHANGED).flush()
+                envs = EnvLoader.load_with_file(self.CONFIG_FILE)
+                self.update_configs_from_remote(envs)
+                if Config().is_master():  # 保存配置
+                    self.save_to_remote()
+            stay_second(self.retry_time)
+
     def update_configs_from_remote(self, envs, first=False):
         if envs == self.envs: return
         from py12306.query.query import Query
         from py12306.user.user import User
         for key, value in envs:
-            if key in self.disallow_update_cofigs: continue
+            if key in self.disallow_update_configs: continue
             if value != -1:
                 old = getattr(self, key)
                 setattr(self, key, value)
@@ -148,8 +184,11 @@ class Config:
     #     return members
 
 
-class EnvLoader():
+class EnvLoader:
     envs = []
+
+    def __init__(self):
+        self.envs = []  # 不是单例不初始化怎么还会有值
 
     @classmethod
     def load_with_file(cls, file):
@@ -161,4 +200,6 @@ class EnvLoader():
         return self.envs
 
     def __setattr__(self, key, value):
-        self.envs.append(([key, value]))
+        super().__setattr__(key, value)
+        if re.search(r'^[A-Z]+_', key):
+            self.envs.append(([key, value]))

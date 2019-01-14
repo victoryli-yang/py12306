@@ -18,7 +18,6 @@ from py12306.log.user_log import UserLog
 class UserJob:
     # heartbeat = 60 * 2  # 心跳保持时长
     is_alive = True
-    heartbeat_interval = 60 * 2
     check_interval = 5
     key = None
     user_name = ''
@@ -27,6 +26,7 @@ class UserJob:
     info = {}  # 用户信息
     last_heartbeat = None
     is_ready = False
+    user_loaded = False  # 用户是否已加载成功
     passengers = []
     retry_time = 3
 
@@ -48,17 +48,16 @@ class UserJob:
         self.key = str(info.get('key'))
         self.user_name = info.get('user_name')
         self.password = info.get('password')
-        self.update_user()
 
     def update_user(self):
         from py12306.user.user import User
         self.user = User()
-        self.heartbeat_interval = self.user.heartbeat
         # if not Const.IS_TEST:  测试模块下也可以从文件中加载用户
         self.load_user()
 
     def run(self):
         # load user
+        self.update_user()
         self.start()
 
     def start(self):
@@ -79,20 +78,22 @@ class UserJob:
 
     def check_heartbeat(self):
         # 心跳检测
-        if self.get_last_heartbeat() and (time_int() - self.get_last_heartbeat()) < self.heartbeat_interval:
+        if self.get_last_heartbeat() and (time_int() - self.get_last_heartbeat()) < Config().USER_HEARTBEAT_INTERVAL:
             return True
         # 只有主节点才能走到这
         if self.is_first_time() or not self.check_user_is_login():
             self.is_ready = False
             if not self.handle_login(): return
+            self.set_last_heartbeat()
 
         self.is_ready = True
-        message = UserLog.MESSAGE_USER_HEARTBEAT_NORMAL.format(self.get_name(), self.heartbeat_interval)
+        self.user_did_load()
+        message = UserLog.MESSAGE_USER_HEARTBEAT_NORMAL.format(self.get_name(), Config().USER_HEARTBEAT_INTERVAL)
         if not Config.is_cluster_enabled():
             UserLog.add_quick_log(message).flush()
         else:
             self.cluster.publish_log_message(message)
-        self.set_last_heartbeat()
+        # self.set_last_heartbeat()
 
     def get_last_heartbeat(self):
         if Config().is_cluster_enabled():
@@ -113,7 +114,7 @@ class UserJob:
 
     def handle_login(self):
         UserLog.print_start_login(user=self)
-        self.login()
+        return self.login()
 
     def login(self):
         """
@@ -157,6 +158,7 @@ class UserJob:
         is_login = response.json().get('data.flag', False)
         if is_login:
             self.save_user()
+            self.set_last_heartbeat()
             # self.get_user_info()  # 检测应该是不会维持状态，这里再请求下个人中心看有没有用，01-10 看来应该是没用
 
         return is_login
@@ -198,7 +200,7 @@ class UserJob:
         self.info = {**self.info, **info}
 
     def get_name(self):
-        return self.info.get('user_name')
+        return self.info.get('user_name', '')
 
     def save_user(self):
         if Config().is_cluster_enabled():
@@ -214,11 +216,20 @@ class UserJob:
         UserLog.add_quick_log(UserLog.MESSAGE_LOADED_USER.format(self.user_name)).flush()
         if self.check_user_is_login() and self.get_user_info():
             UserLog.add_quick_log(UserLog.MESSAGE_LOADED_USER_SUCCESS.format(self.user_name)).flush()
-            Event().user_loaded({'key': self.key}) # 发布通知
             self.is_ready = True
             UserLog.print_welcome_user(self)
+            self.user_did_load()
         else:
             UserLog.add_quick_log(UserLog.MESSAGE_LOADED_USER_BUT_EXPIRED).flush()
+
+    def user_did_load(self):
+        """
+        用户已经加载成功
+        :return:
+        """
+        if self.user_loaded: return
+        self.user_loaded = True
+        Event().user_loaded({'key': self.key})  # 发布通知
 
     def get_user_info(self):
         response = self.session.get(API_USER_INFO.get('url'))
@@ -313,8 +324,8 @@ class UserJob:
                 passenger = array_dict_find_by_key_value(self.passengers, 'passenger_name', member)
                 if not passenger:
                     UserLog.add_quick_log(
-                        UserLog.MESSAGE_USER_PASSENGERS_IS_INVALID.format(self.user_name, member)).flush(
-                        exit=True)  # TODO 需要优化
+                        UserLog.MESSAGE_USER_PASSENGERS_IS_INVALID.format(self.user_name, member)).flush()
+                    return False
                 new_member = {
                     'name': passenger.get('passenger_name'),
                     'id_card': passenger.get('passenger_id_no'),

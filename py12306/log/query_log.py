@@ -17,7 +17,7 @@ class QueryLog(BaseLog):
     quick_log = []
 
     data = {
-        'query_count': 1,
+        'query_count': 0,
         'last_time': '',
     }
     data_path = None
@@ -29,14 +29,14 @@ class QueryLog(BaseLog):
     MESSAGE_QUERY_LOG_OF_TRAIN_INFO = '{} {}'
     MESSAGE_QUERY_START_BY_DATE = '出发日期 {}: {} - {}'
 
-    MESSAGE_JOBS_DID_CHANGED = '\n任务已更新，正在重新加载...'
+    MESSAGE_JOBS_DID_CHANGED = '任务已更新，正在重新加载...\n'
 
     MESSAGE_SKIP_ORDER = '跳过本次请求，节点 {} 用户 {} 正在处理该订单\n'
 
-    MESSAGE_QUERY_JOB_BEING_DESTROY = '当前查询任务 {} 已结束\n'
+    MESSAGE_QUERY_JOB_BEING_DESTROY = '查询任务 {} 已结束\n'
 
     MESSAGE_INIT_PASSENGERS_SUCCESS = '初始化乘客成功'
-    MESSAGE_CHECK_PASSENGERS = '正在验证乘客信息'
+    MESSAGE_CHECK_PASSENGERS = '查询任务 {} 正在验证乘客信息'
 
     MESSAGE_USER_IS_EMPTY_WHEN_DO_ORDER = '未配置自动下单账号，{} 秒后继续查询\n'
     MESSAGE_ORDER_USER_IS_EMPTY = '未找到下单账号，{} 秒后继续查询'
@@ -52,7 +52,7 @@ class QueryLog(BaseLog):
     def init_data(cls):
         self = cls()
         # 获取上次记录
-        if Const.IS_TEST: return
+        # if Const.IS_TEST: return
         result = False
         if not Config.is_cluster_enabled() and path.exists(self.data_path):
             with open(self.data_path, encoding='utf-8') as f:
@@ -152,10 +152,11 @@ class QueryLog(BaseLog):
     @classmethod
     def print_job_start(cls, job_name):
         self = cls()
-        self.refresh_data()
         self.add_log(
-            '=== 正在进行第 {query_count} 次查询 {job_name} === {time}'.format(query_count=self.data.get('query_count'),
-                                                                       job_name=job_name, time=datetime.datetime.now()))
+            '=== 正在进行第 {query_count} 次查询 {job_name} === {time}'.format(
+                query_count=int(self.data.get('query_count', 0)) + 1,
+                job_name=job_name, time=datetime.datetime.now()))
+        self.refresh_data()
         if is_main_thread():
             self.flush(publish=False)
         return self

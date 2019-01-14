@@ -30,7 +30,7 @@ class BaseLog:
         self = cls()
         logs = self.get_logs()
         # 输出到文件
-        if file == None and Config().OUT_PUT_LOG_TO_FILE_ENABLED:  # TODO 文件无法写入友好提示
+        if file == None and Config().OUT_PUT_LOG_TO_FILE_ENABLED and not Const.IS_TEST:  # TODO 文件无法写入友好提示
             file = open(Config().OUT_PUT_LOG_TO_FILE_PATH, 'a', encoding='utf-8')
         if not file: file = None
         # 输出日志到各个节点
@@ -56,7 +56,7 @@ class BaseLog:
                 logs = self.thread_logs.get(current_thread_id())
         return logs
 
-    def empty_logs(self, logs):
+    def empty_logs(self, logs=None):
         if self.quick_log:
             self.quick_log = []
         else:
@@ -72,7 +72,7 @@ class BaseLog:
         return self
 
     def notification(self, title, content=''):
-        if sys.platform == 'darwin':
-            os.system(
-                'osascript -e \'tell app "System Events" to display notification "{content}" with title "{title}"\''.format(
-                    title=title, content=content))
+        # if sys.platform == 'darwin': # 不太友好 先关闭，之前没考虑到 mac 下会请求权限
+        #     os.system( 'osascript -e \'tell app "System Events" to display notification "{content}" with title "{title}"\''.format(
+        #             title=title, content=content))
+        pass
